@@ -1,0 +1,143 @@
+---
+title: "Machine Learning 1, Datapalooza"
+author: "Colin Price"
+date: "11/8/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+COLINS NOTES: I had the pleasure of attending the Machine Learning 1 workshop lead by Ms. Abigail Flowers. She provided this r-markdown file that compared a few different machine learning algorithms on a dataset of smart watch data. I extensively commented the file, detailing what was being said by Ms. Flowers as well as any of my own observations.
+
+Smart watch data was taken with 6 different activity labels, 1 through 6 
+1 WALKING
+2 WALKING_UPSTAIRS
+3 WALKING_DOWNSTAIRS
+4 SITTING
+5 STANDING
+6 LAYING
+in approximately 560 different types of "features" read by the watch. These include measures like acceleration and gryo in all 3 coordinate directions and statistics like mean, standard deviation, etc.
+
+Today we will explore an interesting dataset and compare the performance of different machine learning algorithms at classifying human activity using data collected by smartphones.  This is a slightly trickier dataset than most introductory datasets, as the outcome variable (the particular type of activity) is multi-class rather than binary.  This is data from a Kaggle competition.
+Let's get started!  First we will install the R packages we will need in order to run our algorithms.  You only need to install packages once, unless you update your version of R, in which ase you will need to do it again.
+
+```{r, eval = FALSE}
+install.packages("randomForest")
+install.packages("gmodels")
+install.packages("neuralnet")
+install.packages("RSNNS")
+install.packages("Rcpp")
+install.packages("lattice")
+install.packages("ggplot2")
+install.packages("caret")
+install.packages("knitr")
+```
+
+Now we will "library" those packages.  This needs to be done every time you reopen R, and is simply good practice to do so at the beginning of your code.
+
+```{r}
+library(randomForest)
+library(gmodels)
+library(neuralnet)
+library(RSNNS)
+library(Rcpp)
+library(lattice)
+library(ggplot2)
+library(caret)
+library(knitr)
+``` 
+
+Before we begin, we need to set our working directory and load the data.
+
+```{r}
+#setwd("~/Desktop/Datapalooza_ML1/")
+ad <- read.csv("activities_data.csv")
+#head(ad)
+ad <- ad[,-1] #remove index column
+head(ad) #first ten instances
+tail(ad) #last ten instances
+## Let's explore a bit:
+summary(ad$label)
+
+## Clearly R is assuming that the outcome variable, label, is numeric.  
+## Should it be?  If not, what should it be? We have categorical, but its reading it as a continuous numeric.
+ad$label <- as.factor(ad$label) #This says the labels for ad should now be factors instead of the numerics.
+summary(ad$label) #This tells us how many obs. per category
+```
+Before we can create any model, we need to partition the data into training and test sets -- with the training, we will build the model, and with the test set we will evaluate our performance (i.e) judge how successfully we were able to classify the various types of human activity.  
+
+```{r}
+## Coerce the ad object to be a dataframe.
+ad <- as.data.frame(ad, row.names = NULL) #make sure ad is a data frame
+
+## Create training and test sets.
+index <- sample(nrow(ad), 7500) #pick 7500 rows randomly without replacement (want 75-80% training, rest in test)
+train_set <- ad[index,] #index and
+test_set <- ad[-index,] #naught index
+summary(test_set$label) #we can see we have a pretty good balance
+```
+
+This is a great deal of data for our models to process on a standard PC or laptop, so let's make smaller subsets for the purposes of practicing.
+
+```{r}
+practice_train_set <- train_set[1:3500,] #further subset data to save some computational time. The data is highly dimensional
+practice_test_set <- test_set[1:1500,] #further subset data to save some computational time
+```
+
+Our first model: k-Nearest Neighbor
+Let's talk about the underlying assumptions of this model, then create one together.
+
+```{r}
+set.seed(123) #set up RNG
+model_knn <- train(label~ ., data = practice_train_set, 
+                       method = "knn", 
+                       tuneLength = 1) #Train a model using our practice_train_set. Label is dependent on everything (label~.). k = 5 here by default. We played around with tunelength = 1 and tunelength = 5. The tuneLength parameter tells the algorithm to try different default values for the main parameter
+
+## Make predictions based on this model
+
+p_knn <- predict(model_knn,practice_test_set) #Use the model to make predictions on the test set
+
+## Check performance:
+
+confusionMatrix(p_knn,practice_test_set$label) #create a confusion matrix to evauate performance
+
+```
+
+Our second model: Random Forest
+
+```{r}
+model_rf <- randomForest(label ~ ., practice_train_set)
+p_rf <- predict(model_rf,practice_test_set)
+confusionMatrix(p_rf,practice_test_set$label)
+# Decision tree problems...
+# Quality: Unclear when to terminate builidng the tree -  too deep and we overfit too shallow and we underfit (poor performance either way)
+# Computational Efficiency: Can be expensive to train - for large numbers of queries impossible to search all and for large numbers of data points entropy computations slow
+```
+
+You've probably noticed that we have a tremendously large set of features; it is difficult to believe that all of them are highly important for classification.  Let's perform some feature selection.
+
+```{r}
+v <- varImp(model_rf) 
+varImpPlot(model_rf) #Visualize the features that "matter the most" in the decision tree (highest weighted nodes)
+```
+
+I will use an arbitrary threshold of 5 then 10 "MeanDecreaseGiniIndex" to choose a strong subset of features.
+
+```{r}
+fs <- which(v$Overall>=10) #Threshold
+fs <- fs+1
+fs <- c(1,fs)
+train_set <- ad[index,fs]
+test_set <- ad[-index,fs]
+dim(test_set)
+dim(train_set)
+```
+
+
+```{r}
+model_rf <- randomForest(label ~ ., train_set) #Check performance with reduced feature set
+p_rf <- predict(model_rf,test_set)
+confusionMatrix(p_rf,test_set$label) #Confusion matrix tells performance
+```
+
